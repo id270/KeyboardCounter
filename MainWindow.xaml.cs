@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using Forms = System.Windows.Forms;
 using Drawing = System.Drawing;
 
@@ -24,6 +25,10 @@ public partial class MainWindow : Window
     private long _lastBytesReceived;
     private double _uploadSpeed;
     private double _downloadSpeed;
+
+    // 开机启动
+    private const string RunRegistryKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+    private const string AppName = "KeyboardCounter";
 
     // 虚拟键码
     private const int VK_SPACE = 0x20;
@@ -126,6 +131,36 @@ public partial class MainWindow : Window
         };
     }
 
+    #region 开机启动功能
+
+    // 检查是否已设置开机启动
+    private bool IsAutoStartEnabled()
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunRegistryKey, false);
+        var value = key?.GetValue(AppName);
+        return value != null;
+    }
+
+    // 设置开机启动
+    private void SetAutoStart(bool enable)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RunRegistryKey, true);
+        if (key == null) return;
+
+        if (enable)
+        {
+            // 获取当前程序路径
+            var exePath = Environment.ProcessPath;
+            key.SetValue(AppName, $"\"{exePath}\"");
+        }
+        else
+        {
+            key.DeleteValue(AppName, false);
+        }
+    }
+
+    #endregion
+
     private void InitializeTrayIcon()
     {
         _notifyIcon = new Forms.NotifyIcon
@@ -151,6 +186,20 @@ public partial class MainWindow : Window
             _stopwatch.Restart();
             UpdateDisplay();
         });
+
+        contextMenu.Items.Add(new Forms.ToolStripSeparator());
+
+        // 开机启动选项
+        var autoStartItem = new Forms.ToolStripMenuItem("开机启动");
+        autoStartItem.Click += (s, e) =>
+        {
+            var item = (Forms.ToolStripMenuItem)s!;
+            var enable = !item.Checked;
+            SetAutoStart(enable);
+            item.Checked = enable;
+        };
+        autoStartItem.Checked = IsAutoStartEnabled();
+        contextMenu.Items.Add(autoStartItem);
 
         contextMenu.Items.Add(new Forms.ToolStripSeparator());
 

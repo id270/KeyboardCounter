@@ -30,3 +30,6 @@ x86/
 # NuGet
 packages/
 *.nupkg
+
+# Release packages
+*.zip

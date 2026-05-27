@@ -1,0 +1,92 @@
+<Window x:Class="KeyboardCounter.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:emoji="clr-namespace:Emoji.Wpf;assembly=Emoji.Wpf"
+        Title="键盘计数器"
+        Width="420"
+        Height="32"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Topmost="True"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="Transparent">
+
+    <Border CornerRadius="5"
+            Background="#CC000000"
+            BorderBrush="#FF444444"
+            BorderThickness="1"
+            Padding="6,0">
+
+        <StackPanel Orientation="Horizontal"
+                    VerticalAlignment="Center"
+                    HorizontalAlignment="Center">
+
+            <!-- Emoji 表情 - 使用 emoji.wpf 库 -->
+            <emoji:TextBlock x:Name="EmojiText"
+                             Text="😐"
+                             FontSize="14"
+                             VerticalAlignment="Center"
+                             Margin="0,0,4,0"/>
+
+            <!-- 总计 -->
+            <TextBlock x:Name="TotalText"
+                       Foreground="#FF6B6B"
+                       FontSize="12"
+                       FontFamily="Microsoft YaHei UI"
+                       VerticalAlignment="Center"
+                       Margin="0,0,4,0"/>
+
+            <TextBlock Text="│"
+                       Foreground="#444444"
+                       FontSize="12"
+                       Margin="0,0,4,0"/>
+
+            <!-- 空格 -->
+            <TextBlock x:Name="SpaceText"
+                       Foreground="#4ECDC4"
+                       FontSize="12"
+                       FontFamily="Microsoft YaHei UI"
+                       VerticalAlignment="Center"
+                       Margin="0,0,4,0"/>
+
+            <TextBlock Text="│"
+                       Foreground="#444444"
+                       FontSize="12"
+                       Margin="0,0,4,0"/>
+
+            <!-- 回车 -->
+            <TextBlock x:Name="EnterText"
+                       Foreground="#FFE66D"
+                       FontSize="12"
+                       FontFamily="Microsoft YaHei UI"
+                       VerticalAlignment="Center"
+                       Margin="0,0,4,0"/>
+
+            <TextBlock Text="│"
+                       Foreground="#444444"
+                       FontSize="12"
+                       Margin="0,0,4,0"/>
+
+            <!-- 速度 -->
+            <TextBlock x:Name="SpeedText"
+                       Foreground="#A8E6CF"
+                       FontSize="12"
+                       FontFamily="Microsoft YaHei UI"
+                       VerticalAlignment="Center"
+                       Margin="0,0,4,0"/>
+
+            <TextBlock Text="│"
+                       Foreground="#444444"
+                       FontSize="12"
+                       Margin="0,0,4,0"/>
+
+            <!-- 网络 -->
+            <TextBlock x:Name="NetworkText"
+                       Foreground="#54A0FF"
+                       FontSize="12"
+                       FontFamily="Microsoft YaHei UI"
+                       VerticalAlignment="Center"/>
+        </StackPanel>
+    </Border>
+</Window>

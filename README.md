@@ -23,6 +23,8 @@
 😐 总计:123 | 空格:15(12%) | 回车:8(6%) | 180/m | ↑0.5 ↓1.2MB
 ```
 
+![image-20260527180250821](C:\Users\Administrator\AppData\Roaming\Typora\typora-user-images\image-20260527180250821.png)
+
 ## Emoji 速度等级
 
 | 速度 (CPM) | 表情 | 状态 |

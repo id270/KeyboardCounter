@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:emoji="clr-namespace:Emoji.Wpf;assembly=Emoji.Wpf"
         Title="键盘计数器"
-        Width="420"
+        Width="470"
         Height="32"
         WindowStyle="None"
         AllowsTransparency="True"
@@ -81,7 +81,7 @@
                        FontSize="12"
                        Margin="0,0,4,0"/>
 
-            <!-- 网络 -->
+            <!-- 网络 - 自动切换单位 -->
             <TextBlock x:Name="NetworkText"
                        Foreground="#54A0FF"
                        FontSize="12"

@@ -279,7 +279,18 @@ public partial class MainWindow : Window
         SpaceText.Text = $"空格:{_spaceCount}({spacePercent:F0}%)";
         EnterText.Text = $"回车:{_enterCount}({enterPercent:F0}%)";
         SpeedText.Text = $"{cpm}/m";
-        NetworkText.Text = $"↑{_uploadSpeed:F1} ↓{_downloadSpeed:F1}MB";
+
+        // 自动切换单位：>= 1MB 显示 MB，否则显示 KB
+        if (_uploadSpeed >= 1.0 || _downloadSpeed >= 1.0)
+        {
+            NetworkText.Text = $"↑{_uploadSpeed:F1} ↓{_downloadSpeed:F1}MB";
+        }
+        else
+        {
+            var uploadKB = _uploadSpeed * 1024;
+            var downloadKB = _downloadSpeed * 1024;
+            NetworkText.Text = $"↑{uploadKB:F1} ↓{downloadKB:F1}KB";
+        }
 
         if (_notifyIcon != null)
         {

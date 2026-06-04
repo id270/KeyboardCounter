@@ -60,6 +60,19 @@ public partial class MainWindow : Window
     private const int VK_SPACE = 0x20;
     private const int VK_RETURN = 0x0D;
 
+    // 网络变化监听
+    private DateTime _lastNetworkChangeTime = DateTime.MinValue;
+    private bool _isFetchingWeather;
+    private readonly object _networkChangeLock = new();
+
+    // IP 变化检测
+    private string _lastIpAddress = "";
+    private int _ipCheckCounter = 0; // 每 30 秒检查一次 IP
+
+    // 每日统计
+    private readonly DailyStats _dailyStats;
+    private int _saveCounter = 0; // 每分钟保存一次统计
+
     public MainWindow()
     {
         InitializeComponent();
@@ -72,10 +85,13 @@ public partial class MainWindow : Window
         // 应用布局
         ApplyLayout();
 
-        // 初始化计数
-        _totalCount = 0;
-        _spaceCount = 0;
-        _enterCount = 0;
+        // 加载每日统计数据
+        var statsPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "daily_stats.json");
+        _dailyStats = new DailyStats(statsPath);
+        var (total, space, enter) = _dailyStats.Get(DateTime.Today);
+        _totalCount = total;
+        _spaceCount = space;
+        _enterCount = enter;
 
         // 初始化网络统计
         InitializeNetworkCounters();
@@ -89,16 +105,16 @@ public partial class MainWindow : Window
         _timer.Tick += Timer_Tick;
         _timer.Start();
 
-        // 天气更新定时器（每 10 分钟更新一次）
+        // 天气更新定时器（每 5 分钟更新一次）
         _weatherTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMinutes(10)
+            Interval = TimeSpan.FromMinutes(5)
         };
         _weatherTimer.Tick += WeatherTimer_Tick;
         _weatherTimer.Start();
 
-        // 立即获取天气和ISP
-        _ = FetchWeatherAndISPAsync();
+        // 立即获取天气和ISP，并初始化 IP 地址
+        _ = InitializeIpAndFetchWeatherAsync();
 
         UpdateDisplay();
 
@@ -112,6 +128,71 @@ public partial class MainWindow : Window
         _keyboardHook = new KeyboardHook();
         _keyboardHook.OnKeyDown += OnKeyDown;
         _keyboardHook.Start();
+
+        // 注册网络变化事件监听
+        System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += OnNetworkAddressChanged;
+    }
+
+    // 初始化 IP 并获取天气和 ISP
+    private async Task InitializeIpAndFetchWeatherAsync()
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            _lastIpAddress = await client.GetStringAsync("https://api.ipify.org");
+        }
+        catch
+        {
+            _lastIpAddress = "";
+        }
+        
+        await FetchWeatherAndISPAsync();
+    }
+
+    // 网络变化事件处理（含防抖）
+    private void OnNetworkAddressChanged(object? sender, EventArgs e)
+    {
+        lock (_networkChangeLock)
+        {
+            // 防抖：2 秒内只触发一次
+            var now = DateTime.Now;
+            if ((now - _lastNetworkChangeTime).TotalSeconds < 2)
+                return;
+
+            // 如果正在更新中，跳过
+            if (_isFetchingWeather)
+                return;
+
+            _lastNetworkChangeTime = now;
+        }
+
+        // 在 UI 线程上触发更新（延迟等待网络稳定）
+        Dispatcher.BeginInvoke(async () =>
+        {
+            try
+            {
+                _isFetchingWeather = true;
+                
+                // 等待网络稳定（延迟 3 秒）
+                await Task.Delay(3000);
+                
+                // 重试机制：最多尝试 3 次
+                for (int i = 0; i < 3; i++)
+                {
+                    if (IsNetworkConnected())
+                    {
+                        await FetchWeatherAndISPAsync();
+                        break;
+                    }
+                    // 网络未恢复，等待后重试
+                    await Task.Delay(2000);
+                }
+            }
+            finally
+            {
+                _isFetchingWeather = false;
+            }
+        });
     }
 
     // 应用布局
@@ -179,7 +260,10 @@ public partial class MainWindow : Window
         var oldTemp = _weatherTemp;
         var oldIsp = _ispName;
 
-        // 尝试多个天气 API
+        // 先获取 ISP（运营商）信息
+        await FetchISPAsync();
+
+        // 再尝试多个天气 API
         bool success = await TryWttrInAsync();
 
         if (!success)
@@ -196,7 +280,6 @@ public partial class MainWindow : Window
         {
             _weatherIcon = "🌤";
             _weatherTemp = "--°";
-            _ispName = "-";
         }
 
         // 只有值变化时才更新显示
@@ -204,6 +287,81 @@ public partial class MainWindow : Window
         {
             Dispatcher.Invoke(() => UpdateDisplay());
         }
+    }
+
+    // 获取 ISP（运营商）信息
+    private async Task FetchISPAsync()
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            
+            // 使用 ip-api.com 获取真正的 ISP 信息
+            var response = await client.GetStringAsync("http://ip-api.com/json/");
+            var json = JsonDocument.Parse(response);
+            var root = json.RootElement;
+
+            if (root.TryGetProperty("isp", out var ispProp))
+            {
+                var isp = ispProp.GetString();
+                if (!string.IsNullOrEmpty(isp))
+                {
+                    // 简化 ISP 名称
+                    _ispName = SimplifyISPName(isp);
+                    return;
+                }
+            }
+        }
+        catch { }
+
+        // 备用：使用 ipapi.co
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            var response = await client.GetStringAsync("https://ipapi.co/json/");
+            var json = JsonDocument.Parse(response);
+            var root = json.RootElement;
+
+            if (root.TryGetProperty("org", out var orgProp))
+            {
+                var org = orgProp.GetString();
+                if (!string.IsNullOrEmpty(org))
+                {
+                    _ispName = SimplifyISPName(org);
+                    return;
+                }
+            }
+        }
+        catch { }
+
+        _ispName = "-";
+    }
+
+    // 简化 ISP 名称
+    private static string SimplifyISPName(string isp)
+    {
+        var ispLower = isp.ToLower();
+        
+        // 常见中国运营商简化
+        if (ispLower.Contains("china telecom") || ispLower.Contains("chinanet") || isp.Contains("中国电信") || isp.Contains("电信"))
+            return "中国电信";
+        if (ispLower.Contains("china unicom") || ispLower.Contains("unicom") || isp.Contains("中国联通") || isp.Contains("联通"))
+            return "中国联通";
+        if (ispLower.Contains("china mobile") || ispLower.Contains("cmcc") || isp.Contains("中国移动") || isp.Contains("移动"))
+            return "中国移动";
+        if (ispLower.Contains("cernet") || isp.Contains("教育网"))
+            return "教育网";
+        
+        // 移除 AS 号（如 "AS4134 China Telecom..."）
+        if (isp.StartsWith("AS"))
+        {
+            var spaceIndex = isp.IndexOf(' ');
+            if (spaceIndex > 0)
+                isp = isp.Substring(spaceIndex + 1);
+        }
+        
+        // 截断过长的名称
+        return isp.Length > 15 ? isp.Substring(0, 15) : isp;
     }
 
     // 主 API: wttr.in
@@ -225,19 +383,6 @@ public partial class MainWindow : Window
                     _weatherTemp = $"{tempProp.GetString()}°";
                 if (current.TryGetProperty("weatherCode", out var codeProp))
                     _weatherIcon = GetWeatherEmoji(codeProp.GetString());
-            }
-
-            if (root.TryGetProperty("nearest_area", out var nearestArea) && nearestArea.GetArrayLength() > 0)
-            {
-                var area = nearestArea[0];
-                if (area.TryGetProperty("region", out var region))
-                {
-                    var regionValue = region.GetString();
-                    if (!string.IsNullOrEmpty(regionValue))
-                        _ispName = regionValue;
-                }
-                if (_ispName == "-" && area.TryGetProperty("areaName", out var areaName) && areaName.GetArrayLength() > 0)
-                    _ispName = areaName[0].GetString() ?? "-";
             }
 
             return true;
@@ -262,8 +407,6 @@ public partial class MainWindow : Window
                 lat = latProp.ToString();
             if (ipRoot.TryGetProperty("longitude", out var lonProp))
                 lon = lonProp.ToString();
-            if (ipRoot.TryGetProperty("city", out var cityProp))
-                _ispName = cityProp.GetString() ?? "-";
 
             // 获取天气
             var weatherUrl = $"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true";
@@ -301,8 +444,6 @@ public partial class MainWindow : Window
                 lat = latProp.ToString();
             if (ipRoot.TryGetProperty("lon", out var lonProp))
                 lon = lonProp.ToString();
-            if (ipRoot.TryGetProperty("city", out var cityProp))
-                _ispName = cityProp.GetString() ?? "-";
 
             // 使用 7Timer API 获取天气
             var weatherUrl = $"http://www.7timer.info/bin/api.pl?lon={lon}&lat={lat}&product=civil&output=json";
@@ -495,6 +636,8 @@ public partial class MainWindow : Window
             _spaceCount = 0;
             _enterCount = 0;
             _stopwatch.Restart();
+            // 同步清零当天 JSON 数据
+            _dailyStats.Reset(DateTime.Today);
             UpdateDisplay();
         });
 
@@ -563,6 +706,52 @@ public partial class MainWindow : Window
     {
         UpdateNetworkSpeed();
         UpdateDisplay();
+        
+        // 每 30 秒检查一次 IP 是否变化
+        _ipCheckCounter++;
+        if (_ipCheckCounter >= 30)
+        {
+            _ipCheckCounter = 0;
+            _ = CheckIpChangeAsync();
+        }
+
+        // 每分钟保存一次统计数据
+        _saveCounter++;
+        if (_saveCounter >= 60)
+        {
+            _saveCounter = 0;
+            SaveDailyStats();
+        }
+    }
+
+    // 保存每日统计数据
+    private void SaveDailyStats()
+    {
+        _dailyStats.Save(DateTime.Today, _totalCount, _spaceCount, _enterCount);
+    }
+
+    // 检查 IP 是否变化
+    private async Task CheckIpChangeAsync()
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            var ip = await client.GetStringAsync("https://api.ipify.org");
+            
+            if (!string.IsNullOrEmpty(ip) && ip != _lastIpAddress)
+            {
+                _lastIpAddress = ip;
+                // IP 变化，触发更新
+                if (!_isFetchingWeather)
+                {
+                    await FetchWeatherAndISPAsync();
+                }
+            }
+        }
+        catch
+        {
+            // 忽略网络错误
+        }
     }
 
     private void OnKeyDown(int vkCode)
@@ -594,10 +783,10 @@ public partial class MainWindow : Window
         var networkText = $"{uploadStr} {downloadStr}";
         var totalDownloadText = FormatTotalDownload(_totalDownloadGB);
 
-        // 纵向布局专用：更紧凑的网络显示
+        // 纵向布局专用：更紧凑的网络显示（保留 1 位小数）
         string networkTextV = _uploadSpeed >= 1.0 || _downloadSpeed >= 1.0
             ? $"↑{_uploadSpeed:F1}M ↓{_downloadSpeed:F1}M"
-            : $"↑{_uploadSpeed * 1024:F0}K ↓{_downloadSpeed * 1024:F0}K";
+            : $"↑{_uploadSpeed * 1024:F1}K ↓{_downloadSpeed * 1024:F1}K";
 
         if (_isVertical)
         {
@@ -704,6 +893,13 @@ public partial class MainWindow : Window
         _keyboardHook.Dispose();
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+        
+        // 取消网络变化事件订阅
+        System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged -= OnNetworkAddressChanged;
+        
+        // 保存每日统计数据
+        SaveDailyStats();
+        
         base.OnClosed(e);
     }
 

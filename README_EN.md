@@ -15,8 +15,10 @@ A lightweight keyboard statistics tool that displays keystrokes, typing speed, n
 - **Typing Speed** - Characters per minute (CPM)
 - **Network Traffic** - Upload/download speed (KB/s or MB/s)
 - **Total Download** - Cumulative download traffic (KB/MB/GB)
-- **Weather Display** - Current weather icon and temperature based on IP geolocation
-- **ISP Name** - Current network provider
+- **Weather Display** - Current weather icon and temperature based on IP geolocation (updates every 5 min)
+- **ISP Name** - Current network provider (China Telecom/Unicom/Mobile)
+- **Daily Statistics** - Records daily keystroke data, auto-restores on restart
+- **Smart Network Detection** - Auto-updates weather and ISP when VPN connects/switches country
 - **Emoji Expression** - Changes based on total keystrokes
 - **Layout Switching** - Horizontal and vertical display modes
 - **System Tray** - Minimize to tray with context menu
@@ -109,10 +111,12 @@ KeyboardCounter/
 ├── MainWindow.xaml.cs        # Main window logic
 ├── KeyboardHook.cs           # Global keyboard hook
 ├── IniConfig.cs              # INI config handler
+├── DailyStats.cs             # Daily statistics manager
 ├── README.md                 # Chinese documentation
 ├── README_EN.md              # English documentation
 ├── AI_DEV_GUIDE.md           # AI Development Guide
-└── config.ini                # Runtime config file
+├── config.ini                # Runtime config file
+└── daily_stats.json          # Daily statistics data (auto-generated)
 ```
 
 ## Requirements
@@ -121,6 +125,15 @@ KeyboardCounter/
 - .NET 8.0 Runtime
 
 ## Changelog
+
+### v1.5
+- ✨ Added daily keystroke statistics (total/space/enter), auto-restores on restart
+- ✨ Added smart network detection, auto-updates weather and ISP when VPN connects/switches
+- ✨ Added IP change detection (polls every 30s), triggers update when VPN country changes
+- 🔧 Improved ISP display: correctly shows "China Telecom/Unicom/Mobile"
+- 🔧 Added delay + retry mechanism for network changes to avoid transient state errors
+- 🔧 Weather update interval changed from 10 min to 5 min
+- 🐛 Fixed vertical layout network speed decimal display issue
 
 ### v1.4
 - ✨ Added weather display (icon + temperature)

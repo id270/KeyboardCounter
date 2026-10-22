@@ -1,6 +1,6 @@
 # KeyboardCounter ⌨
 
-一个轻量级的键盘统计工具，实时显示按键次数、打字速度、网络流量和天气信息，并支持鼠标划词翻译。
+一个轻量级的 Windows 桌面小工具：实时显示**按键次数、CPM 打字速度、网络流量和天气**，并支持**鼠标划词翻译**（离线词典 ECDICT + CC-CEDICT、本地 SQLite 缓存、有道 / 百度在线接口）。
 
 ![Demo](https://img.shields.io/badge/.NET-8.0-blue) ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey) ![License](https://img.shields.io/badge/License-MIT-green) ![AI](https://img.shields.io/badge/Developed%20by-Claude%20Code%20%2B%20DeepSeek%20Harness-purple)
 

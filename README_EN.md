@@ -1,6 +1,6 @@
 # KeyboardCounter ⌨
 
-A lightweight keyboard statistics tool that shows keystrokes, typing speed, network traffic and weather in real time — plus a hover-style **selection translation** popup with an offline dictionary.
+A lightweight Windows desktop widget that shows **keystroke count, CPM typing speed, network traffic and weather** in real time — plus **selection translation** with an offline dictionary (ECDICT + CC-CEDICT), a local SQLite cache, and Youdao / Baidu online translation.
 
 ![Demo](https://img.shields.io/badge/.NET-8.0-blue) ![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey) ![License](https://img.shields.io/badge/License-MIT-green) ![AI](https://img.shields.io/badge/Developed%20by-Claude%20Code%20%2B%20DeepSeek%20Harness-purple)
 

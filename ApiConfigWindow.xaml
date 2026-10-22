@@ -1,0 +1,160 @@
+<Window x:Class="KeyboardCounter.ApiConfigWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="划词翻译设置"
+        Width="580"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        FontFamily="Microsoft YaHei UI"
+        Background="#FFF7F8FA">
+
+    <StackPanel Margin="18">
+
+        <TextBlock Text="划词翻译" FontSize="16" FontWeight="SemiBold" Foreground="#FF1F2329" />
+        <TextBlock Margin="0,4,0,0"
+                   FontSize="11"
+                   Foreground="#FF6B7280"
+                   TextWrapping="Wrap"
+                   Text="鼠标选中中文或英文后，自动在光标旁显示译文并可朗读。密钥只保存在程序目录的 config.ini 中，仅会发送给所选的翻译接口。" />
+
+        <CheckBox x:Name="EnabledCheck"
+                  Margin="0,14,0,0"
+                  Content="启用划词翻译（拖动划选 / 双击选词触发）"
+                  VerticalContentAlignment="Center" />
+
+        <Grid Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="76" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="翻译接口" FontSize="12" VerticalAlignment="Center" />
+            <ComboBox x:Name="ProviderCombo"
+                      Grid.Column="1"
+                      Height="28"
+                      VerticalContentAlignment="Center"
+                      SelectionChanged="ProviderCombo_SelectionChanged">
+                <ComboBoxItem Content="有道智云（有道翻译）" />
+                <ComboBoxItem Content="百度翻译开放平台" />
+            </ComboBox>
+        </Grid>
+
+        <Grid Margin="0,8,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="76" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="取词方式" FontSize="12" VerticalAlignment="Center" />
+            <ComboBox x:Name="SelectionModeCombo"
+                      Grid.Column="1"
+                      Height="28"
+                      VerticalContentAlignment="Center">
+                <ComboBoxItem Content="仅 UIA（不碰剪贴板，推荐）" />
+                <ComboBoxItem Content="UIA + 剪贴板兜底" />
+                <ComboBoxItem Content="仅剪贴板" />
+            </ComboBox>
+        </Grid>
+
+        <TextBlock Margin="76,4,0,0" FontSize="11" Foreground="#FF6B7280" TextWrapping="Wrap"
+                   Text="「仅 UIA」完全不会读写剪贴板，最安全，但少数不支持可访问性的窗口取不到词；「UIA + 剪贴板兜底」范围最大，代价是取词瞬间会占用剪贴板（取完还原）。" />
+
+        <!-- 有道 -->
+        <GroupBox x:Name="YoudaoGroup" Header="有道智云" Margin="0,12,0,0" Padding="10">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="104" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="应用 ID (appKey)"
+                               FontSize="12" VerticalAlignment="Center" />
+                    <TextBox x:Name="YoudaoKeyBox" Grid.Row="0" Grid.Column="1"
+                             Height="26" Margin="0,3" VerticalContentAlignment="Center" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="应用密钥"
+                               FontSize="12" VerticalAlignment="Center" />
+                    <TextBox x:Name="YoudaoSecretBox" Grid.Row="1" Grid.Column="1"
+                             Height="26" Margin="0,3" VerticalContentAlignment="Center" />
+                </Grid>
+
+                <TextBlock Margin="0,6,0,0" FontSize="11" Foreground="#FF6B7280" TextWrapping="Wrap">
+                    <Hyperlink NavigateUri="https://ai.youdao.com/" RequestNavigate="Hyperlink_RequestNavigate">
+                        打开有道智云
+                    </Hyperlink>
+                    <Run Text="→ 注册登录 → 应用管理创建应用（平台选“API”）→ 在文本翻译服务中绑定应用。新用户赠送 50 元体验金，约 100 万字符。" />
+                </TextBlock>
+            </StackPanel>
+        </GroupBox>
+
+        <!-- 百度 -->
+        <GroupBox x:Name="BaiduGroup" Header="百度翻译开放平台" Margin="0,10,0,0" Padding="10">
+            <StackPanel>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="104" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="APP ID"
+                               FontSize="12" VerticalAlignment="Center" />
+                    <TextBox x:Name="BaiduIdBox" Grid.Row="0" Grid.Column="1"
+                             Height="26" Margin="0,3" VerticalContentAlignment="Center" />
+
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="密钥"
+                               FontSize="12" VerticalAlignment="Center" />
+                    <TextBox x:Name="BaiduSecretBox" Grid.Row="1" Grid.Column="1"
+                             Height="26" Margin="0,3" VerticalContentAlignment="Center" />
+                </Grid>
+
+                <TextBlock Margin="0,6,0,0" FontSize="11" Foreground="#FF6B7280" TextWrapping="Wrap">
+                    <Hyperlink NavigateUri="https://fanyi-api.baidu.com/" RequestNavigate="Hyperlink_RequestNavigate">
+                        打开百度翻译开放平台
+                    </Hyperlink>
+                    <Run Text="→ 登录并实名认证 → 开通“通用文本翻译” → 在我的服务中查看 APP ID 与密钥。标准版每月 5 万字符免费（QPS=1），个人认证后的高级版每月 100 万字符。" />
+                </TextBlock>
+            </StackPanel>
+        </GroupBox>
+
+        <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+            <!-- 发音功能暂时关闭
+            <CheckBox x:Name="AutoSpeakCheck" Content="翻译后自动朗读" VerticalAlignment="Center" />
+            -->
+            <TextBlock Text="单个词条最大字符数" FontSize="12" Margin="0,0,6,0" VerticalAlignment="Center" />
+            <TextBox x:Name="MaxLengthBox" Width="64" Height="24" VerticalContentAlignment="Center" />
+        </StackPanel>
+
+        <!-- 测试 -->
+        <Border Margin="0,14,0,0" Background="#FFEFF1F5" CornerRadius="4" Padding="10">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <TextBox x:Name="TestInputBox" Width="210" Height="28" Text="hello"
+                             VerticalContentAlignment="Center" />
+                    <Button x:Name="TestButton" Content="测试翻译" Width="88" Height="28" Margin="8,0,0,0"
+                            Click="TestButton_Click" />
+                    <TextBlock Text="先用任意词试一条，确认密钥可用" FontSize="11"
+                               Foreground="#FF6B7280" Margin="10,0,0,0" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock x:Name="TestResultText" Margin="0,8,0,0" FontSize="12"
+                           Foreground="#FF1F2329" TextWrapping="Wrap" />
+            </StackPanel>
+        </Border>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="打开申请页面" Width="110" Height="30" Margin="0,0,8,0"
+                    Click="OpenApplyPage_Click" />
+            <Button Content="保存" Width="84" Height="30" IsDefault="True" Click="SaveButton_Click" />
+            <Button Content="取消" Width="84" Height="30" Margin="8,0,0,0" Click="CancelButton_Click" />
+        </StackPanel>
+
+    </StackPanel>
+</Window>

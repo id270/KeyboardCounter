@@ -29,6 +29,8 @@ public class KeyboardHook : IDisposable
     private const int WH_KEYBOARD_LL = 13;
     private const int WM_KEYDOWN = 0x0100;
     private const int WM_SYSKEYDOWN = 0x0104;
+    private const int WM_KEYUP = 0x0101;
+    private const int WM_SYSKEYUP = 0x0105;
 
     #endregion
 
@@ -36,6 +38,8 @@ public class KeyboardHook : IDisposable
     private LowLevelKeyboardProc _proc = null!;
 
     public event Action<int>? OnKeyDown;
+
+    public event Action<int>? OnKeyUp;
 
     public KeyboardHook()
     {
@@ -60,10 +64,19 @@ public class KeyboardHook : IDisposable
 
     private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        if (nCode >= 0 && (wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN))
+        if (nCode >= 0)
         {
-            var vkCode = Marshal.ReadInt32(lParam);
-            OnKeyDown?.Invoke(vkCode);
+            var message = wParam.ToInt32();
+            if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
+            {
+                var vkCode = Marshal.ReadInt32(lParam);
+                OnKeyDown?.Invoke(vkCode);
+            }
+            else if (message == WM_KEYUP || message == WM_SYSKEYUP)
+            {
+                var vkCode = Marshal.ReadInt32(lParam);
+                OnKeyUp?.Invoke(vkCode);
+            }
         }
 
         return CallNextHookEx(_hookId, nCode, wParam, lParam);

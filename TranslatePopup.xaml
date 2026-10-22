@@ -1,0 +1,151 @@
+<Window x:Class="KeyboardCounter.TranslatePopup"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="划词翻译"
+        MinWidth="200"
+        MaxWidth="480"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        Topmost="True"
+        ResizeMode="NoResize"
+        SizeToContent="WidthAndHeight"
+        FontFamily="Microsoft YaHei UI"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
+
+    <Window.Resources>
+        <Style x:Key="FlatButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="#99FFFFFF" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="6,2" />
+            <Setter Property="Margin" Value="1,0,0,0" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="4"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#2AFFFFFF" />
+                                <Setter Property="Foreground" Value="#FFFFFFFF" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#4DFFFFFF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border CornerRadius="8"
+            Background="#F2131419"
+            BorderBrush="#6600B4FF"
+            BorderThickness="1"
+            Padding="12,9"
+            MaxWidth="460">
+        <StackPanel>
+            <!-- 顶栏：接口名 + 操作按钮 -->
+            <DockPanel Margin="0,0,0,6" LastChildFill="False">
+                <TextBlock x:Name="ProviderText"
+                           DockPanel.Dock="Left"
+                           Foreground="#80FFFFFF"
+                           FontSize="10"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <!-- 发音功能暂时关闭：需要时取消注释即可（代码里的 SetSpeakButtons 也一并恢复）
+                    <Button x:Name="SpeakUsButton"
+                            Style="{StaticResource FlatButton}"
+                            Visibility="Collapsed"
+                            ToolTip="美式发音"
+                            Click="SpeakUsButton_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE767;" FontFamily="Segoe MDL2 Assets" FontSize="12" VerticalAlignment="Center" />
+                            <TextBlock Text="美" Margin="4,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="SpeakUkButton"
+                            Style="{StaticResource FlatButton}"
+                            Visibility="Collapsed"
+                            ToolTip="英式发音"
+                            Click="SpeakUkButton_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE767;" FontFamily="Segoe MDL2 Assets" FontSize="12" VerticalAlignment="Center" />
+                            <TextBlock Text="英" Margin="4,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="SpeakButton"
+                            Style="{StaticResource FlatButton}"
+                            Visibility="Collapsed"
+                            ToolTip="朗读"
+                            Click="SpeakButton_Click">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE767;" FontFamily="Segoe MDL2 Assets" FontSize="12" VerticalAlignment="Center" />
+                            <TextBlock Text="发音" Margin="4,0,0,0" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+                    -->
+                    <Button x:Name="CopyButton"
+                            Style="{StaticResource FlatButton}"
+                            Content="复制"
+                            ToolTip="复制译文"
+                            Click="CopyButton_Click" />
+                    <Button x:Name="CloseButton"
+                            Style="{StaticResource FlatButton}"
+                            Content="✕"
+                            ToolTip="关闭"
+                            Click="CloseButton_Click" />
+                </StackPanel>
+            </DockPanel>
+
+            <!-- 原文 -->
+            <TextBlock x:Name="SourceText"
+                       Foreground="#99FFFFFF"
+                       FontSize="11"
+                       TextWrapping="Wrap"
+                       MaxWidth="430"
+                       Margin="0,0,0,6" />
+
+            <!-- 音标（离线词典命中时显示） -->
+            <TextBlock x:Name="PhoneticText"
+                       Foreground="#FF87CEEB"
+                       FontSize="11"
+                       FontFamily="Segoe UI"
+                       TextWrapping="Wrap"
+                       MaxWidth="430"
+                       Margin="0,0,0,4"
+                       Visibility="Collapsed" />
+
+            <!-- 译文 -->
+            <TextBlock x:Name="ResultText"
+                       Foreground="#F2F5FAFF"
+                       FontSize="14"
+                       LineHeight="21"
+                       TextWrapping="Wrap"
+                       MaxWidth="430" />
+
+            <!-- 错误/提示 -->
+            <TextBlock x:Name="StatusText"
+                       Foreground="#FFFF9A8B"
+                       FontSize="11"
+                       TextWrapping="Wrap"
+                       MaxWidth="430"
+                       Margin="0,6,0,0"
+                       Visibility="Collapsed" />
+        </StackPanel>
+    </Border>
+</Window>

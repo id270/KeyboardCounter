@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -18,6 +20,7 @@ public partial class MainWindow : Window
 {
     private readonly KeyboardHook _keyboardHook;
     private Forms.NotifyIcon _notifyIcon = null!;
+    private Forms.ContextMenuStrip _trayMenu = null!;
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _weatherTimer;
     private readonly Stopwatch _stopwatch;
@@ -59,6 +62,37 @@ public partial class MainWindow : Window
     // 虚拟键码
     private const int VK_SPACE = 0x20;
     private const int VK_RETURN = 0x0D;
+    private const int VK_ESCAPE = 0x1B;
+    private const int VK_T = 0x54;
+    private const int VK_CONTROL = 0x11;
+    private const int VK_LCONTROL = 0xA2;
+    private const int VK_RCONTROL = 0xA3;
+    private const int VK_MENU = 0x12;
+    private const int VK_LMENU = 0xA4;
+    private const int VK_RMENU = 0xA5;
+
+    private bool _ctrlDown;
+    private bool _altDown;
+
+    // 划词翻译
+    private TranslateSettings _translateSettings = null!;
+    private SelectionWatcher? _selectionWatcher;
+    private TranslatePopup? _translatePopup;
+    // 发音功能暂时关闭（见 TranslateSelectionAsync 里注释掉的部分）
+    // private PronunciationService? _speaker;
+    private TranslationCache? _translationCache;
+    private EcdictDictionary? _dictionary;
+    private CancellationTokenSource? _translateCts;
+
+    // 划词翻译托盘菜单项
+    private Forms.ToolStripMenuItem _translateEnabledItem = null!;
+    private Forms.ToolStripMenuItem _translateYoudaoItem = null!;
+    private Forms.ToolStripMenuItem _translateBaiduItem = null!;
+    private Forms.ToolStripMenuItem _selectionModeUiaItem = null!;
+    private Forms.ToolStripMenuItem _selectionModeMixedItem = null!;
+    private Forms.ToolStripMenuItem _selectionModeClipboardItem = null!;
+    private int _lastUiaFailNoticeTick;
+    private string _lastFailedProcessName = "";
 
     // 网络变化监听
     private DateTime _lastNetworkChangeTime = DateTime.MinValue;
@@ -81,6 +115,23 @@ public partial class MainWindow : Window
         var configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.ini");
         _config = new IniConfig(configPath);
         _isVertical = _config.GetBool("Display", "Vertical", false);
+
+        // 加载划词翻译配置
+        _translateSettings = TranslateSettings.Load(_config);
+        DebugTrace.Enabled = _translateSettings.Debug;
+        // 发音功能暂时关闭
+        // _speaker = new PronunciationService();
+
+        // 本地翻译缓存：程序目录\cache\translate_cache.db
+        var cacheDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cache");
+        _translationCache = new TranslationCache(cacheDirectory);
+
+        // 离线词典：程序目录\dict\dictionary.db（由 tools\EcdictImporter 生成）
+        _dictionary = EcdictDictionary.TryOpen(
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "dict", "dictionary.db"));
+
+        // 预热一次：首次查询要加载索引页，先跑一次避免第一次划词多等几十毫秒
+        _dictionary?.TryLookup("warmup", out _);
 
         // 应用布局
         ApplyLayout();
@@ -124,9 +175,13 @@ public partial class MainWindow : Window
         // 初始化系统托盘
         InitializeTrayIcon();
 
+        // 初始化划词翻译（等窗口显示、消息循环就绪后再装鼠标钩子）
+        Loaded += MainWindow_Loaded;
+
         // 初始化键盘钩子
         _keyboardHook = new KeyboardHook();
         _keyboardHook.OnKeyDown += OnKeyDown;
+        _keyboardHook.OnKeyUp += OnKeyUp;
         _keyboardHook.Start();
 
         // 注册网络变化事件监听
@@ -615,20 +670,29 @@ public partial class MainWindow : Window
 
     private void InitializeTrayIcon()
     {
+        // 注意：Icon 一定要在 Visible 之前赋值，否则 NIM_ADD 时图标是空的
+        var icon = CreateIcon();
         _notifyIcon = new Forms.NotifyIcon
         {
             Text = "键盘计数器",
-            Visible = true,
-            Icon = CreateIcon()
+            Icon = icon,
+            Visible = true
         };
 
+        ScheduleTrayIconReRegister();
+
         var contextMenu = new Forms.ContextMenuStrip();
+        _trayMenu = contextMenu;
 
         contextMenu.Items.Add("显示窗口", null, (s, e) =>
         {
             Show();
             WindowState = WindowState.Normal;
         });
+
+        contextMenu.Items.Add("划词翻译设置...", null, (s, e) => ShowTranslateConfig());
+
+        contextMenu.Items.Add(new Forms.ToolStripSeparator());
 
         contextMenu.Items.Add("重置计数", null, (s, e) =>
         {
@@ -660,6 +724,60 @@ public partial class MainWindow : Window
 
         contextMenu.Items.Add(new Forms.ToolStripSeparator());
 
+        // 划词翻译
+        var translateMenu = new Forms.ToolStripMenuItem("划词翻译");
+
+        _translateEnabledItem = new Forms.ToolStripMenuItem("启用划词翻译");
+        _translateEnabledItem.Click += (s, e) => ToggleTranslateEnabled();
+        translateMenu.DropDownItems.Add(_translateEnabledItem);
+
+        translateMenu.DropDownItems.Add(new Forms.ToolStripSeparator());
+
+        var providerMenu = new Forms.ToolStripMenuItem("翻译接口");
+
+        _translateYoudaoItem = new Forms.ToolStripMenuItem("有道翻译");
+        _translateYoudaoItem.Click += (s, e) => SetTranslateProvider(TranslateProvider.Youdao);
+        providerMenu.DropDownItems.Add(_translateYoudaoItem);
+
+        _translateBaiduItem = new Forms.ToolStripMenuItem("百度翻译");
+        _translateBaiduItem.Click += (s, e) => SetTranslateProvider(TranslateProvider.Baidu);
+        providerMenu.DropDownItems.Add(_translateBaiduItem);
+
+        translateMenu.DropDownItems.Add(providerMenu);
+
+        // 取词方式
+        var selectionModeMenu = new Forms.ToolStripMenuItem("取词方式");
+
+        _selectionModeUiaItem = new Forms.ToolStripMenuItem("仅 UIA（不碰剪贴板）");
+        _selectionModeUiaItem.Click += (s, e) => ApplySelectionMode(SelectionMode.UiaOnly);
+        selectionModeMenu.DropDownItems.Add(_selectionModeUiaItem);
+
+        _selectionModeMixedItem = new Forms.ToolStripMenuItem("UIA + 剪贴板兜底");
+        _selectionModeMixedItem.Click += (s, e) => ApplySelectionMode(SelectionMode.UiaWithClipboard);
+        selectionModeMenu.DropDownItems.Add(_selectionModeMixedItem);
+
+        _selectionModeClipboardItem = new Forms.ToolStripMenuItem("仅剪贴板");
+        _selectionModeClipboardItem.Click += (s, e) => ApplySelectionMode(SelectionMode.ClipboardOnly);
+        selectionModeMenu.DropDownItems.Add(_selectionModeClipboardItem);
+
+        translateMenu.DropDownItems.Add(selectionModeMenu);
+
+        var whitelistItem = new Forms.ToolStripMenuItem("把上一个取词失败的程序加入白名单");
+        whitelistItem.Click += (s, e) => AddLastFailedProcessToWhitelist();
+        translateMenu.DropDownItems.Add(whitelistItem);
+
+        var configItem = new Forms.ToolStripMenuItem("翻译接口配置...");
+        configItem.Click += (s, e) => ShowTranslateConfig();
+        translateMenu.DropDownItems.Add(configItem);
+
+        var clipboardItem = new Forms.ToolStripMenuItem("翻译剪贴板 (Ctrl+Alt+T)");
+        clipboardItem.Click += (s, e) => TranslateClipboardAsync();
+        translateMenu.DropDownItems.Add(clipboardItem);
+
+        contextMenu.Items.Add(translateMenu);
+
+        contextMenu.Items.Add(new Forms.ToolStripSeparator());
+
         var autoStartItem = new Forms.ToolStripMenuItem("开机启动");
         autoStartItem.Click += (s, e) =>
         {
@@ -683,6 +801,35 @@ public partial class MainWindow : Window
         };
     }
 
+    /// <summary>
+    /// 托盘图标偶尔会被 Explorer 丢掉（尤其是程序被强杀后，同一个 exe 路径会留下失效的托盘记录）。
+    /// 启动一段时间后重新注册一次，并记一条日志，便于排查"托盘看不到"。
+    /// </summary>
+    private void ScheduleTrayIconReRegister()
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2.5) };
+        timer.Tick += (s, e) =>
+        {
+            timer.Stop();
+            TryReRegisterTrayIcon();
+        };
+        timer.Start();
+    }
+
+    private void TryReRegisterTrayIcon()
+    {
+        try
+        {
+            _notifyIcon.Visible = false;
+            _notifyIcon.Visible = true;
+            DebugTrace.Log($"tray icon re-registered, text=[{_notifyIcon.Text}]");
+        }
+        catch (Exception ex)
+        {
+            DebugTrace.Log("tray icon re-register failed: " + ex.Message);
+        }
+    }
+
     private Drawing.Icon CreateIcon()
     {
         using var bitmap = new Drawing.Bitmap(32, 32);
@@ -694,6 +841,396 @@ public partial class MainWindow : Window
         var hIcon = bitmap.GetHicon();
         return Drawing.Icon.FromHandle(hIcon);
     }
+
+    #region 划词翻译
+
+    private static readonly bool DebugEnabled = Environment.GetEnvironmentVariable("KC_DEBUG") == "1";
+    private static void Dbg(string message)
+    {
+        DebugTrace.Log(message);
+    }
+
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        Loaded -= MainWindow_Loaded;
+        InitializeTranslation();
+        _ = ShowFirstRunSetupAsync();
+    }
+
+    /// <summary>按当前配置启动/停止划词监听</summary>
+    private void InitializeTranslation()
+    {
+        Dbg($"InitializeTranslation enabled={_translateSettings.Enabled} provider={_translateSettings.Provider} configured={_translateSettings.IsConfigured} maxLen={_translateSettings.MaxLength}");
+
+        if (_translateSettings.Enabled)
+        {
+            _selectionWatcher ??= CreateSelectionWatcher();
+            _selectionWatcher.Start();
+
+            // 预创建并预热气泡窗口，避免第一次划词时才解析 XAML / 建窗口 / 建 DWM 表面
+            var popup = EnsurePopup();
+            Dispatcher.BeginInvoke(new Action(() => popup.WarmUp()), DispatcherPriority.Background);
+            Dbg($"watcher started running={_selectionWatcher.IsRunning}");
+        }
+        else
+        {
+            _selectionWatcher?.Stop();
+            _translatePopup?.HidePopup();
+        }
+
+        UpdateTranslateMenuState();
+    }
+
+    private SelectionWatcher CreateSelectionWatcher()
+    {
+        var watcher = new SelectionWatcher(Dispatcher)
+        {
+            Mode = _translateSettings.SelectionMode,
+            ClipboardFallbackProcesses = _translateSettings.GetClipboardFallbackProcessList()
+        };
+        watcher.SelectionCaptured += OnSelectionCaptured;
+        watcher.LeftButtonPressed += OnGlobalLeftButtonDown;
+        watcher.SelectionCapturePending += (x, y) => EnsurePopup().ShowPending(x, y);
+        watcher.SelectionCaptureFailed += OnSelectionCaptureFailed;
+        return watcher;
+    }
+
+    /// <summary>没取到文字时：关掉占位气泡，记下是哪个程序，并偶尔提示一次怎么绕过</summary>
+    private void OnSelectionCaptureFailed(int screenX, int screenY)
+    {
+        _translatePopup?.HidePopup();
+
+        var processName = SelectionCapture.GetProcessNameAt(screenX, screenY)
+                          ?? SelectionCapture.GetForegroundProcessName();
+        if (!string.IsNullOrEmpty(processName) &&
+            !processName.Equals("KeyboardCounter.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            _lastFailedProcessName = processName;
+        }
+
+        if (_translateSettings.SelectionMode != SelectionMode.UiaOnly)
+            return;
+
+        var now = Environment.TickCount;
+        if (now - _lastUiaFailNoticeTick < 30000)
+            return;
+
+        _lastUiaFailNoticeTick = now;
+        ShowTranslateBalloon(string.IsNullOrEmpty(_lastFailedProcessName)
+            ? "这个窗口不支持直接取词（UIA）。可以在托盘菜单把该程序加入取词白名单，或把取词方式改成「UIA + 剪贴板兜底」。"
+            : $"{_lastFailedProcessName} 不支持直接取词（UIA）。托盘菜单 → 划词翻译 → 把「{_lastFailedProcessName}」加入取词白名单 即可用剪贴板兜底（仅对该程序生效）。");
+    }
+
+    /// <summary>把上一次取词失败的程序加入白名单（仅它允许用剪贴板兜底）</summary>
+    private void AddLastFailedProcessToWhitelist()
+    {
+        if (string.IsNullOrEmpty(_lastFailedProcessName))
+        {
+            ShowTranslateBalloon("请先在目标程序里划一次词，我再把它加入白名单。");
+            return;
+        }
+
+        var list = new List<string>(_translateSettings.GetClipboardFallbackProcessList());
+        if (list.Exists(n => n.Equals(_lastFailedProcessName, StringComparison.OrdinalIgnoreCase)))
+        {
+            ShowTranslateBalloon($"{_lastFailedProcessName} 已经在取词白名单里了。");
+            return;
+        }
+
+        list.Add(_lastFailedProcessName);
+        _translateSettings.ClipboardFallbackProcesses = string.Join(",", list);
+        SaveTranslateSettings();
+
+        _selectionWatcher?.Dispose();
+        _selectionWatcher = null;
+        InitializeTranslation();
+
+        ShowTranslateBalloon($"已把 {_lastFailedProcessName} 加入取词白名单：只有该程序会用剪贴板兜底，其它程序仍然完全不碰剪贴板。");
+    }
+
+    private async void OnSelectionCaptured(string text, int screenX, int screenY)
+    {
+        Dbg($"OnSelectionCaptured at ({screenX},{screenY}) len={text.Length}");
+        try
+        {
+            await TranslateSelectionAsync(text, screenX, screenY);
+        }
+        catch (Exception ex)
+        {
+            // 划词翻译不能影响主程序
+            Dbg("OnSelectionCaptured exception: " + ex);
+        }
+    }
+
+    private async Task TranslateSelectionAsync(string text, int screenX, int screenY)
+    {
+        if (!_translateSettings.Enabled)
+            return;
+
+        var started = Environment.TickCount;
+
+        // 在自己的窗口里划词不处理
+        if (ScreenGeometry.ContainsPixelPoint(this, screenX, screenY))
+            return;
+        if (_translatePopup != null && _translatePopup.ContainsPixelPoint(screenX, screenY))
+            return;
+
+        if (text.Length > _translateSettings.MaxLength)
+        {
+            Dbg("skipped: too long");
+            return;
+        }
+
+        var popup = EnsurePopup();
+        var provider = TranslationService.Create(_translateSettings);
+        Dbg($"provider={(provider == null ? "null" : provider.Name)}");
+
+        // 1) 离线词典优先：查到就直接显示（音标 + 多义项，不走网络、不需要密钥）
+        var dictionaryWatch = System.Diagnostics.Stopwatch.StartNew();
+        if (_dictionary is { IsAvailable: true } && _dictionary.TryLookup(text, out var dictionaryEntry))
+        {
+            dictionaryWatch.Stop();
+            popup.ShowDictionary(text, dictionaryEntry, screenX, screenY);
+            Dbg($"dictionary hit: {dictionaryEntry.Word}, lookup={dictionaryWatch.Elapsed.TotalMilliseconds:F2}ms, popup +{Environment.TickCount - started}ms");
+            return;
+        }
+
+        dictionaryWatch.Stop();
+        Dbg($"dictionary miss ({dictionaryWatch.Elapsed.TotalMilliseconds:F2}ms)");
+
+        if (provider == null)
+        {
+            popup.ShowNotice(text,
+                $"离线词典里没有这个词，而且还没有配置{_translateSettings.ProviderDisplayName}的密钥。\n右键托盘图标 → 划词翻译 → 翻译接口配置",
+                screenX, screenY);
+            return;
+        }
+
+        // 2) 本地缓存：之前翻译过就直接用
+        if (_translationCache != null && _translationCache.TryGet(provider.Name, text, out var cached))
+        {
+            Dbg($"cache hit: {provider.Name} / {text.Length} chars");
+            popup.ShowResult(cached, screenX, screenY);
+            return;
+        }
+
+        Dbg("cache miss");
+
+        _translateCts?.Cancel();
+        _translateCts?.Dispose();
+        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        _translateCts = cts;
+
+        popup.ShowLoading(text, screenX, screenY, provider.Name);
+
+        try
+        {
+            var result = await provider.TranslateAsync(text, cts.Token);
+            if (cts.IsCancellationRequested)
+                return;
+
+            popup.ShowResult(result, screenX, screenY);
+
+            // 成功的结果写进本地缓存，下次同样的词/短语直接命中
+            _translationCache?.Put(provider.Name, text, result);
+
+            // 发音功能暂时关闭（保留代码，需要时取消注释即可）
+            // if (_translateSettings.AutoSpeak)
+            // {
+            //     var sourceIsChinese = LanguageUtil.ContainsChinese(result.SourceText);
+            //     var speakText = sourceIsChinese ? result.TranslatedText : result.SourceText;
+            //     // 朗读的是译文时要用译文的发音地址
+            //     var speakUrl = sourceIsChinese ? result.TranslatedSpeakUrl : result.SpeakUrl;
+            //     _ = SpeakTextAsync(speakText, true, speakUrl);
+            // }
+        }
+        catch (OperationCanceledException)
+        {
+            // 被新的划词取消，忽略
+        }
+        catch (TranslationException ex)
+        {
+            popup.ShowError(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            popup.ShowError("翻译失败：" + ex.Message);
+        }
+    }
+
+    // 发音功能暂时关闭
+    // private async Task SpeakTextAsync(string text, bool american, string speakUrl)
+    // {
+    //     try
+    //     {
+    //         if (_speaker == null || string.IsNullOrWhiteSpace(text))
+    //             return;
+    //
+    //         await _speaker.PlayAsync(text, speakUrl, american, CancellationToken.None);
+    //     }
+    //     catch
+    //     {
+    //         // 发音失败不影响翻译显示
+    //     }
+    // }
+
+    private TranslatePopup EnsurePopup()
+    {
+        if (_translatePopup == null)
+        {
+            _translatePopup = new TranslatePopup();
+            // 发音功能暂时关闭
+            // _translatePopup.SpeakRequested += (text, american) =>
+            //     _ = SpeakTextAsync(text, american, _translatePopup?.CurrentSpeakUrl ?? "");
+        }
+
+        return _translatePopup;
+    }
+
+    /// <summary>左键点在气泡外面就关掉气泡</summary>
+    private void OnGlobalLeftButtonDown(int screenX, int screenY)
+    {
+        var popup = _translatePopup;
+        if (popup == null || !popup.IsVisible)
+            return;
+
+        if (!popup.ContainsPixelPoint(screenX, screenY))
+            popup.HidePopup();
+    }
+
+    private void ToggleTranslateEnabled()
+    {
+        _translateSettings.Enabled = !_translateSettings.Enabled;
+        SaveTranslateSettings();
+        InitializeTranslation();
+
+        if (!_translateSettings.Enabled)
+        {
+            _translatePopup?.HidePopup();
+            return;
+        }
+
+        ShowTranslateBalloon(_translateSettings.IsConfigured
+            ? "划词翻译已开启：拖动划选或双击选词即可翻译。"
+            : "划词翻译已开启，但还没有配置翻译接口。右键托盘图标 → 划词翻译 → 翻译接口配置。");
+    }
+
+    private void SetTranslateProvider(TranslateProvider provider)
+    {
+        _translateSettings.Provider = provider;
+        SaveTranslateSettings();
+        UpdateTranslateMenuState();
+
+        ShowTranslateBalloon(_translateSettings.IsConfigured
+            ? $"已切换到{_translateSettings.ProviderDisplayName}。"
+            : $"已切换到{_translateSettings.ProviderDisplayName}，请先填写密钥。右键托盘图标 → 划词翻译 → 翻译接口配置。");
+    }
+
+    private void UpdateTranslateMenuState()
+    {
+        if (_translateEnabledItem == null || _translateYoudaoItem == null || _translateBaiduItem == null)
+            return;
+
+        _translateEnabledItem.Checked = _translateSettings.Enabled;
+        _translateYoudaoItem.Checked = _translateSettings.Provider == TranslateProvider.Youdao;
+        _translateBaiduItem.Checked = _translateSettings.Provider == TranslateProvider.Baidu;
+
+        if (_selectionModeUiaItem != null)
+        {
+            _selectionModeUiaItem.Checked = _translateSettings.SelectionMode == SelectionMode.UiaOnly;
+            _selectionModeMixedItem.Checked = _translateSettings.SelectionMode == SelectionMode.UiaWithClipboard;
+            _selectionModeClipboardItem.Checked = _translateSettings.SelectionMode == SelectionMode.ClipboardOnly;
+        }
+    }
+
+    /// <summary>切换取词方式：重建监听器（模式是在构造时传给它的）</summary>
+    private void ApplySelectionMode(SelectionMode mode)
+    {
+        if (_translateSettings.SelectionMode == mode)
+        {
+            UpdateTranslateMenuState();
+            return;
+        }
+
+        _translateSettings.SelectionMode = mode;
+        SaveTranslateSettings();
+
+        _selectionWatcher?.Dispose();
+        _selectionWatcher = null;
+        InitializeTranslation();
+
+        ShowTranslateBalloon($"取词方式已切换为：{_translateSettings.SelectionModeDisplayName}");
+    }
+
+    private void ShowTranslateConfig()
+    {
+        _translatePopup?.HidePopup();
+
+        var window = new ApiConfigWindow(_translateSettings);
+        if (IsVisible)
+            window.Owner = this;
+
+        if (window.ShowDialog() == true)
+        {
+            _translateSettings = window.Settings;
+            DebugTrace.Enabled = _translateSettings.Debug;
+            SaveTranslateSettings();
+            InitializeTranslation();
+
+            ShowTranslateBalloon(_translateSettings.Enabled
+                ? "配置已保存，划词翻译已启用。"
+                : "配置已保存。");
+        }
+    }
+
+    private void SaveTranslateSettings()
+    {
+        _translateSettings.Save(_config);
+    }
+
+    private void ShowTranslateBalloon(string message)
+    {
+        try
+        {
+            _notifyIcon.ShowBalloonTip(4000, "划词翻译", message, Forms.ToolTipIcon.Info);
+        }
+        catch
+        {
+            // 托盘气泡失败时忽略
+        }
+    }
+
+    /// <summary>
+    /// 首次运行引导：还没配置接口时自动弹出配置窗口（只弹一次），
+    /// 之后每次启动只在悬浮窗托盘气泡里提醒。
+    /// </summary>
+    private async Task ShowFirstRunSetupAsync()
+    {
+        try
+        {
+            if (_translateSettings.IsConfigured)
+                return;
+
+            await Task.Delay(1200);
+
+            if (!_translateSettings.Prompted)
+            {
+                _translateSettings.Prompted = true;
+                SaveTranslateSettings();
+                ShowTranslateConfig();
+                return;
+            }
+
+            ShowTranslateBalloon(
+                "划词翻译还没有配置接口。右键右下角的悬浮窗（或托盘图标）→ 划词翻译设置，填入有道/百度的密钥即可。");
+        }
+        catch
+        {
+            // 忽略
+        }
+    }
+
+    #endregion
 
     private void PositionWindow()
     {
@@ -756,13 +1293,85 @@ public partial class MainWindow : Window
 
     private void OnKeyDown(int vkCode)
     {
+        var isCtrl = IsCtrlKey(vkCode);
+        var isAlt = IsAltKey(vkCode);
+
         Dispatcher.Invoke(() =>
         {
+            if (isCtrl)
+                _ctrlDown = true;
+            if (isAlt)
+                _altDown = true;
+
+            if (vkCode == VK_ESCAPE)
+                _translatePopup?.HidePopup();
+
+            // 全局热键：Ctrl + Alt + T 翻译剪贴板
+            if (vkCode == VK_T && _ctrlDown && _altDown)
+            {
+                Dbg("hotkey ctrl+alt+t");
+                _ctrlDown = false;
+                _altDown = false;
+                TranslateClipboardAsync();
+                return;
+            }
+
             _totalCount++;
             if (vkCode == VK_SPACE) _spaceCount++;
             else if (vkCode == VK_RETURN) _enterCount++;
             UpdateDisplay();
         });
+    }
+
+    private void OnKeyUp(int vkCode)
+    {
+        var isCtrl = IsCtrlKey(vkCode);
+        var isAlt = IsAltKey(vkCode);
+        if (!isCtrl && !isAlt)
+            return;
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (isCtrl)
+                _ctrlDown = false;
+            if (isAlt)
+                _altDown = false;
+        });
+    }
+
+    private static bool IsCtrlKey(int vkCode) => vkCode == VK_CONTROL || vkCode == VK_LCONTROL || vkCode == VK_RCONTROL;
+
+    private static bool IsAltKey(int vkCode) => vkCode == VK_MENU || vkCode == VK_LMENU || vkCode == VK_RMENU;
+
+    /// <summary>翻译剪贴板里的文字（Ctrl+Alt+T）</summary>
+    private async void TranslateClipboardAsync()
+    {
+        try
+        {
+            Dbg("TranslateClipboardAsync start");
+
+            var clipboardText = SelectionCapture.TryGetClipboardText();
+            if (string.IsNullOrWhiteSpace(clipboardText))
+            {
+                Dbg("clipboard has no text");
+                ShowTranslateBalloon("剪贴板里没有文字（或暂时被其它程序占用，稍后再试）。");
+                return;
+            }
+
+            var text = LanguageUtil.Normalize(clipboardText);
+            if (text.Length == 0)
+            {
+                ShowTranslateBalloon("剪贴板里没有文字。");
+                return;
+            }
+
+            var cursor = Forms.Cursor.Position;
+            await TranslateSelectionAsync(text, cursor.X, cursor.Y);
+        }
+        catch (Exception ex)
+        {
+            ShowTranslateBalloon("翻译剪贴板失败：" + ex.Message);
+        }
     }
 
     private void UpdateDisplay()
@@ -891,6 +1500,23 @@ public partial class MainWindow : Window
         _timer.Stop();
         _weatherTimer.Stop();
         _keyboardHook.Dispose();
+
+        // 释放划词翻译相关资源
+        _translateCts?.Cancel();
+        _translateCts?.Dispose();
+        _translateCts = null;
+        _selectionWatcher?.Dispose();
+        _selectionWatcher = null;
+        _translatePopup?.ClosePopup();
+        _translatePopup = null;
+        // 发音功能暂时关闭
+        // _speaker?.Dispose();
+        // _speaker = null;
+        _translationCache?.Dispose();
+        _translationCache = null;
+        _dictionary?.Dispose();
+        _dictionary = null;
+
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
         
@@ -907,5 +1533,21 @@ public partial class MainWindow : Window
     {
         base.OnMouseLeftButtonDown(e);
         DragMove();
+    }
+
+    /// <summary>在悬浮窗上右键，弹出和托盘相同的菜单（托盘图标被折叠时也能配置）</summary>
+    protected override void OnMouseRightButtonUp(MouseButtonEventArgs e)
+    {
+        base.OnMouseRightButtonUp(e);
+
+        try
+        {
+            _trayMenu?.Show(Forms.Cursor.Position);
+            e.Handled = true;
+        }
+        catch
+        {
+            // 菜单弹出失败时忽略
+        }
     }
 }
